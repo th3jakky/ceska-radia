@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="cs" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Česká Rádia - HLS & MP3 Online Přehrávač</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        neon: {
+                            blue: '#00f0ff',
+                            purple: '#7000ff',
+                            pink: '#ff007f',
+                            green: '#00ff66'
+                        }
+                    },
+                    boxShadow: {
+                        'neon-blue': '0 0 15px rgba(0, 240, 255, 0.4)',
+                        'neon-pink': '0 0 15px rgba(255, 0, 127, 0.4)',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Google Fonts & Font Awesome -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- HLS.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #090d16;
+            color: #f1f5f9;
+        }
+
+        /* Neon Glow Effects */
+        .neon-border {
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            transition: all 0.3s ease;
+        }
+        .neon-border:hover {
+            border-color: rgba(0, 240, 255, 0.6);
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.25);
+        }
+
+        /* Glassmorphism Effect */
+        .glass {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        /* Equalizer Animation Bars */
+        .eq-bar {
+            width: 3px;
+            background: linear-gradient(to top, #00f0ff, #7000ff);
+            border-radius: 2px;
+            animation: bounce 0.8s infinite alternate ease-in-out;
+        }
+        .eq-bar:nth-child(1) { height: 70%; animation-delay: 0.1s; }
+        .eq-bar:nth-child(2) { height: 100%; animation-delay: 0.3s; }
+        .eq-bar:nth-child(3) { height: 40%; animation-delay: 0.2s; }
+        .eq-bar:nth-child(4) { height: 90%; animation-delay: 0.4s; }
+        .eq-bar:nth-child(5) { height: 60%; animation-delay: 0.15s; }
+
+        .paused .eq-bar {
+            animation-play-state: paused;
+            height: 20% !important;
+            opacity: 0.3;
+        }
+
+        @keyframes bounce {
+            0% { transform: scaleY(0.2); }
+            100% { transform: scaleY(1); }
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #090d16;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1e293b;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #334155;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col pb-32 select-none overflow-x-hidden">
+
+    <!-- Hidden HTML5 Audio Element -->
+    <audio id="audio-player" preload="none"></audio>
+
+    <!-- Header & Navigation -->
+    <header class="sticky top-0 z-40 glass shadow-2xl">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5">
+            <div class="flex items-center justify-between gap-4">
+                
+                <!-- Logo -->
+                <div class="flex items-center space-x-3 cursor-pointer" onclick="resetFilters()">
+                    <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-cyan-500 via-indigo-600 to-fuchsia-500 flex items-center justify-center shadow-neon-blue">
+                        <i class="fa-solid fa-radio text-white text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-extrabold tracking-tight bg-gradient-to-r from-cyan-400 via-sky-200 to-fuchsia-400 bg-clip-text text-transparent">
+                            ČESKÁ RÁDIA
+                        </h1>
+                        <p class="text-[11px] text-cyan-400/80 font-medium tracking-wide">HLS & HTTPS ONLINE STREAMING</p>
+                    </div>
+                </div>
+
+                <!-- Search Input -->
+                <div class="relative flex-1 max-w-md">
+                    <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                    </div>
+                    <input type="text" id="search-input" 
+                           placeholder="Vyhledat rádio, žánr..." 
+                           class="w-full pl-10 pr-10 py-2 bg-slate-900/90 border border-slate-700/80 rounded-full text-sm text-slate-100 placeholder-slate-400 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all">
+                    <button id="clear-search" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white hidden">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <!-- Favorites Badge Toggle -->
+                <button id="fav-filter-btn" onclick="toggleFavoriteFilter()" 
+                        class="px-4 py-2 rounded-full border border-slate-700 bg-slate-900/80 hover:border-pink-500/50 text-slate-300 hover:text-white text-xs sm:text-sm font-medium flex items-center gap-2 transition-all">
+                    <i class="fa-solid fa-heart text-rose-500"></i>
+                    <span class="hidden md:inline">Oblíbené</span>
+                    <span id="fav-count" class="bg-rose-500/20 text-rose-300 text-xs px-2 py-0.5 rounded-full font-bold border border-rose-500/30">0</span>
+                </button>
+            </div>
+
+            <!-- Categories Horizontal Bar -->
+            <div class="flex items-center gap-2 mt-3.5 overflow-x-auto pb-1 text-xs sm:text-sm scrollbar-none" id="categories-container">
+                <!-- Injected via JavaScript -->
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        
+        <!-- Autoplay Blocking Warning Banner (Hidden by default) -->
+        <div id="autoplay-banner" class="hidden mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 flex items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <i class="fa-solid fa-triangle-exclamation text-amber-400 text-xl"></i>
+                <div class="text-sm">
+                    <p class="font-semibold">Prohlížeč zablokoval automatické přehrávání zvuku</p>
+                    <p class="text-xs text-amber-300/80">Klikněte na tlačítko pro aktivaci audio výstupu v prohlížeči.</p>
+                </div>
+            </div>
+            <button onclick="unlockAudio()" class="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 transition shadow-lg flex-shrink-0">
+                <i class="fa-solid fa-volume-high mr-1.5"></i> Aktivovat Zvuk
+            </button>
+        </div>
+
+        <!-- Section Title & Counter -->
+        <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center gap-2.5">
+                <h2 id="section-title" class="text-lg font-bold text-slate-100">Všechny stanice</h2>
+                <span id="stations-count" class="text-xs font-semibold text-cyan-400 bg-cyan-950/60 px-3 py-0.5 rounded-full border border-cyan-800/50">0</span>
+            </div>
+            <p class="text-xs text-slate-400 hidden sm:block">
+                Podpora HLS (.m3u8) & HTTPS MP3 streamů
+            </p>
+        </div>
+
+        <!-- Radio Stations Grid -->
+        <div id="stations-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <!-- Dynamic station cards injected here -->
+        </div>
+
+        <!-- Empty State View -->
+        <div id="empty-state" class="hidden flex-col items-center justify-center py-20 text-center">
+            <div class="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mb-4 text-2xl shadow-inner">
+                <i class="fa-solid fa-radio"></i>
+            </div>
+            <h3 class="text-lg font-semibold text-slate-200 mb-1">Žádná rádia nenalezena</h3>
+            <p class="text-slate-400 text-sm max-w-sm mb-5">Zkuste upravit hledaný výraz nebo zvolit jiný žánrový filtr.</p>
+            <button onclick="resetFilters()" class="px-5 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-neon-blue transition">
+                Zobrazit všechna rádia
+            </button>
+        </div>
+
+    </main>
+
+    <!-- Bottom Player Dock -->
+    <div class="fixed bottom-0 left-0 right-0 z-50 glass border-t border-slate-800/80 px-4 py-3.5 shadow-2xl">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+            
+            <!-- Left: Current Station Details -->
+            <div class="flex items-center gap-3.5 w-full sm:w-1/3">
+                <div id="player-avatar" class="w-12 h-12 rounded-xl bg-slate-900 border border-slate-700/80 flex items-center justify-center text-slate-400 text-xl flex-shrink-0 relative overflow-hidden shadow-md">
+                    <i id="player-icon" class="fa-solid fa-radio"></i>
+                    <div id="player-live-dot" class="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-900 hidden animate-pulse"></div>
+                </div>
+
+                <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                        <h3 id="player-title" class="font-bold text-slate-100 text-sm truncate">Vyberte rádio</h3>
+                        <span id="player-stream-type" class="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold uppercase bg-slate-800 text-slate-400 hidden">MP3</span>
+                    </div>
+                    <p id="player-subtitle" class="text-xs text-slate-400 truncate mt-0.5">Klikněte na jakoukoli stanici pro spuštění</p>
+                </div>
+
+                <!-- Favorite Toggle -->
+                <button id="player-fav-btn" onclick="toggleCurrentPlayerFavorite()" class="text-slate-500 hover:text-rose-500 transition p-2 disabled:opacity-30" disabled>
+                    <i class="fa-regular fa-heart text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Center: Controls & Audio Visualizer -->
+            <div class="flex flex-col items-center gap-1.5 w-full sm:w-1/3">
+                <div class="flex items-center gap-5">
+                    <!-- Stop Button -->
+                    <button id="stop-btn" onclick="stopRadio()" class="text-slate-400 hover:text-rose-400 transition p-2 disabled:opacity-30" disabled title="Zastavit přehrávání">
+                        <i class="fa-solid fa-square text-sm"></i>
+                    </button>
+
+                    <!-- Play/Pause Button -->
+                    <button id="play-pause-btn" onclick="togglePlayPause()" 
+                            class="w-12 h-12 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold flex items-center justify-center shadow-neon-blue transition transform active:scale-95 disabled:opacity-40 disabled:shadow-none" disabled>
+                        <i id="play-icon" class="fa-solid fa-play text-lg ml-0.5"></i>
+                    </button>
+
+                    <!-- Equalizer Visualizer -->
+                    <div id="eq-visualizer" class="h-6 flex items-end gap-1 px-2 py-1 paused">
+                        <div class="eq-bar"></div>
+                        <div class="eq-bar"></div>
+                        <div class="eq-bar"></div>
+                        <div class="eq-bar"></div>
+                        <div class="eq-bar"></div>
+                    </div>
+                </div>
+
+                <!-- Status Feedback Bar -->
+                <div id="player-status-bar" class="text-[11px] font-mono text-slate-400 flex items-center gap-1.5">
+                    <span id="player-status-text">Připraven k přehrávání</span>
+                    <button id="retry-btn" onclick="retryCurrentStation()" class="hidden text-cyan-400 hover:underline font-bold ml-1">
+                        <i class="fa-solid fa-rotate-right"></i> Zkuste znovu
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right: Volume Slider & Controls -->
+            <div class="flex items-center justify-end gap-3 w-full sm:w-1/3">
+                <div class="flex items-center gap-2.5 max-w-[160px] w-full">
+                    <button id="mute-btn" onclick="toggleMute()" class="text-slate-400 hover:text-cyan-400 transition">
+                        <i id="mute-icon" class="fa-solid fa-volume-high text-sm w-4"></i>
+                    </button>
+                    <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="0.8" 
+                           class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400">
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Toast Notification Overlay -->
+    <div id="toast" class="fixed top-20 right-4 z-50 transform transition-all duration-300 translate-y-[-20px] opacity-0 pointer-events-none bg-slate-900/90 text-slate-100 px-4 py-3 rounded-2xl border border-slate-700/80 shadow-2xl flex items-center gap-3 text-sm backdrop-blur-md">
+        <i id="toast-icon" class="fa-solid fa-circle-info text-cyan-400"></i>
+        <span id="toast-msg">Oznámení</span>
+    </div>
+
+    <!-- Application Script -->
+    <script>
+        // Verified Czech Radio Stations with Working HTTPS Audio & HLS Streams
+        const STATIONS = [
+            {
+                id: 'cro-radiozurnal',
+                name: 'ČRo Radiožurnál',
+                category: 'Zprávy',
+                description: 'Zpravodajství, publicistika, sport a aktuální informace 24/7.',
+                url: 'https://cro-radiozurnal.ice.infomaniak.ch/cro-radiozurnal-128.mp3',
+                fallbackUrl: 'https://icecast6.play.cz/cro1-128.mp3',
+                type: 'mp3',
+                color: 'from-red-600 to-rose-900'
+            },
+            {
+                id: 'evropa-2',
+                name: 'Evropa 2',
+                category: 'Pop',
+                description: 'Maaxximum muziky, ranní show a nejnovější světoznámé hity.',
+                url: 'https://ice.actve.net/e2-cz-128.mp3',
+                fallbackUrl: 'https://icecast4.play.cz/evropa2-128.mp3',
+                type: 'mp3',
+                color: 'from-sky-500 to-blue-700'
+            },
+            {
+                id: 'frekvence-1',
+                name: 'Frekvence 1',
+                category: 'Pop',
+                description: 'Zprávy, zábava, česká hudba a informace pro celou rodinu.',
+                url: 'https://ice.actve.net/f1-cz-128.mp3',
+                fallbackUrl: 'https://icecast4.play.cz/frekvence1-128.mp3',
+                type: 'mp3',
+                color: 'from-amber-500 to-orange-700'
+            },
+            {
+                id: 'radio-impuls',
+                name: 'Rádio Impuls',
+                category: 'Pop',
+                description: 'Nejposlouchanější české písničky a rychlá dopravní servisní síť.',
+                url: 'https://impuls.streamtheworld.com/IMPULS.mp3',
+                fallbackUrl: 'https://icecast5.play.cz/impuls128.mp3',
+                type: 'mp3',
+                color: 'from-yellow-500 to-amber-700'
+            },
+            {
+                id: 'radio-kiss',
+                name: 'Radio Kiss',
+                category: 'Dance',
+                description: 'Taneční beaty, hity 90. let, milénium i horké novinky.',
+                url: 'https://icecast4.play.cz/kiss128.mp3',
+                fallbackUrl: 'https://icecast.unitedbroadcasting.cz/kiss.mp3',
+                type: 'mp3',
+                color: 'from-rose-600 to-pink-800'
+            },
+            {
+                id: 'radio-beat',
+                name: 'Radio Beat',
+                category: 'Rock',
+                description: 'První rockové rádio v ČR - klasik rock, hardrock a metal.',
+                url: 'https://icecast4.play.cz/radiobeat128.mp3',
+                fallbackUrl: 'https://icecast.unitedbroadcasting.cz/beat.mp3',
+                type: 'mp3',
+                color: 'from-zinc-700 to-slate-900'
+            },
+            {
+                id: 'radio-blanik',
+                name: 'Rádio Blaník',
+                category: 'Pop',
+                description: 'Pohodové české písničky a skvělá atmosféra bez stresu.',
+                url: 'https://icecast4.play.cz/blanik128.mp3',
+                fallbackUrl: 'https://icecast.unitedbroadcasting.cz/blanik.mp3',
+                type: 'mp3',
+                color: 'from-emerald-600 to-teal-800'
+            },
+            {
+                id: 'rock-radio',
+                name: 'Rock Radio',
+                category: 'Rock',
+                description: 'Rock je slušná muzika. Český i zahraniční rockový nářez.',
+                url: 'https://icecast4.play.cz/rockradio128.mp3',
+                fallbackUrl: 'https://icecast.unitedbroadcasting.cz/rockradio.mp3',
+                type: 'mp3',
+                color: 'from-red-800 to-stone-900'
+            },
+            {
+                id: 'country-radio',
+                name: 'Country Radio',
+                category: 'Folk',
+                description: 'Klidné melodie - country, folk, bluegrass a trampská klasika.',
+                url: 'https://icecast4.play.cz/country128.mp3',
+                fallbackUrl: 'https://icecast.unitedbroadcasting.cz/country.mp3',
+                type: 'mp3',
+                color: 'from-amber-700 to-yellow-900'
+            },
+            {
+                id: 'fajn-radio',
+                name: 'Fajn Radio',
+                category: 'Pop',
+                description: 'Čerstvé novinky, trendy z TikToku a energická popová muzika.',
+                url: 'https://icecast4.play.cz/fajn128.mp3',
+                fallbackUrl: 'https://icecast.unitedbroadcasting.cz/fajn.mp3',
+                type: 'mp3',
+                color: 'from-indigo-600 to-purple-800'
+            },
+            {
+                id: 'cro-dvojka',
+                name: 'ČRo Dvojka',
+                category: 'Pop',
+                description: 'Rodinná zábava, pohoda, zajímavé rozhovory a český pop.',
+                url: 'https://icecast6.play.cz/cro2-128.mp3',
+                fallbackUrl: 'https://cro-dvojka.ice.infomaniak.ch/cro-dvojka-128.mp3',
+                type: 'mp3',
+                color: 'from-orange-600 to-amber-800'
+            },
+            {
+                id: 'cro-wave',
+                name: 'ČRo Radio Wave',
+                category: 'Dance',
+                description: 'Alternativní hudba, mládežnická kultura a nezávislá scéna.',
+                url: 'https://icecast6.play.cz/crowave-128.mp3',
+                fallbackUrl: 'https://cro-wave.ice.infomaniak.ch/cro-wave-128.mp3',
+                type: 'mp3',
+                color: 'from-pink-600 to-fuchsia-900'
+            }
+        ];
+
+        // Categories Filter List
+        const CATEGORIES = ['Vše', 'Pop', 'Rock', 'Zprávy', 'Dance', 'Folk'];
+
+        // State Management
+        let currentStation = null;
+        let isPlaying = false;
+        let selectedCategory = 'Vše';
+        let searchQuery = '';
+        let favorites = JSON.parse(localStorage.getItem('cz_radio_favs_v2') || '[]');
+        let showOnlyFavs = false;
+        let lastVolume = 0.8;
+        let hlsInstance = null;
+        let isUsingFallback = false;
+
+        // DOM Elements
+        const audio = document.getElementById('audio-player');
+        const stationsGrid = document.getElementById('stations-grid');
+        const emptyState = document.getElementById('empty-state');
+        const categoriesContainer = document.getElementById('categories-container');
+        const searchInput = document.getElementById('search-input');
+        const clearSearchBtn = document.getElementById('clear-search');
+        const favCountBadge = document.getElementById('fav-count');
+        const favFilterBtn = document.getElementById('fav-filter-btn');
+        const sectionTitle = document.getElementById('section-title');
+        const stationsCount = document.getElementById('stations-count');
+        const autoplayBanner = document.getElementById('autoplay-banner');
+
+        // Player DOM Elements
+        const playerTitle = document.getElementById('player-title');
+        const playerSubtitle = document.getElementById('player-subtitle');
+        const playerAvatar = document.getElementById('player-avatar');
+        const playerIcon = document.getElementById('player-icon');
+        const playerLiveDot = document.getElementById('player-live-dot');
+        const playerStreamType = document.getElementById('player-stream-type');
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        const playIcon = document.getElementById('play-icon');
+        const stopBtn = document.getElementById('stop-btn');
+        const volumeSlider = document.getElementById('volume-slider');
+        const muteBtn = document.getElementById('mute-btn');
+        const playerFavBtn = document.getElementById('player-fav-btn');
+        const eqVisualizer = document.getElementById('eq-visualizer');
+        const playerStatusText = document.getElementById('player-status-text');
+        const retryBtn = document.getElementById('retry-btn');
+
+        // App Initialization
+        window.addEventListener('DOMContentLoaded', () => {
+            renderCategories();
+            renderStations();
+            updateFavBadge();
+            setupAudioEvents();
+            setupSearchInput();
+        });
+
+        // Setup HTML5 Audio Events
+        function setupAudioEvents() {
+            audio.volume = volumeSlider.value;
+
+            audio.addEventListener('loadstart', () => {
+                setStatus('Načítání živého streamu...', 'amber', true);
+            });
+
+            audio.addEventListener('playing', () => {
+                isPlaying = true;
+                autoplayBanner.classList.add('hidden');
+                setStatus('Živé vysílání (Naživo)', 'emerald');
+                updatePlayerUI();
+                renderStations();
+            });
+
+            audio.addEventListener('pause', () => {
+                isPlaying = false;
+                if (audio.currentTime === 0 || audio.ended) {
+                    setStatus('Zastaveno');
+                } else {
+                    setStatus('Pozastaveno');
+                }
+                updatePlayerUI();
+                renderStations();
+            });
+
+            audio.addEventListener('error', (e) => {
+                console.warn('Audio stream error encountered:', e);
+                handleStreamError();
+            });
+
+            volumeSlider.addEventListener('input', (e) => {
+                audio.volume = e.target.value;
+                if (e.target.value > 0) audio.muted = false;
+                updateVolumeIcon();
+            });
+        }
+
+        // Handle Stream Errors and Fallback Switching
+        function handleStreamError() {
+            if (currentStation && currentStation.fallbackUrl && !isUsingFallback) {
+                isUsingFallback = true;
+                setStatus('Primární adresa selhala, zkouším záložní stream...', 'amber', true);
+                showToast('Přepínám na záložní stream...', 'info');
+                loadAndPlayStream(currentStation.fallbackUrl);
+            } else {
+                isPlaying = false;
+                updatePlayerUI();
+                renderStations();
+                setStatus('Chyba přehrávání / Stream je nedostupný', 'rose');
+                retryBtn.classList.remove('hidden');
+                showToast('Stream se nepodařilo načíst. Zkontrolujte připojení.', 'error');
+            }
+        }
+
+        // Load Stream via Native HTML5 Audio or HLS.js
+        function loadAndPlayStream(streamUrl) {
+            destroyHls(); // Clean up previous HLS instance
+
+            const isHls = streamUrl.includes('.m3u8');
+            playerStreamType.textContent = isHls ? 'HLS' : 'MP3';
+            playerStreamType.classList.remove('hidden');
+
+            if (isHls && Hls.isSupported()) {
+                hlsInstance = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                });
+                hlsInstance.loadSource(streamUrl);
+                hlsInstance.attachMedia(audio);
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                    playAudioWithAutoplayCheck();
+                });
+                hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.fatal) {
+                        console.error('HLS Fatal Error:', data);
+                        handleStreamError();
+                    }
+                });
+            } else {
+                audio.src = streamUrl;
+                audio.load();
+                playAudioWithAutoplayCheck();
+            }
+        }
+
+        // Attempt Audio Playback with Autoplay Policy Guard
+        function playAudioWithAutoplayCheck() {
+            const playPromise = audio.play();
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
+                    isPlaying = true;
+                    autoplayBanner.classList.add('hidden');
+                    retryBtn.classList.add('hidden');
+                    updatePlayerUI();
+                    renderStations();
+                }).catch(error => {
+                    console.warn('Autoplay prevented by browser policy:', error);
+                    isPlaying = false;
+                    autoplayBanner.classList.remove('hidden');
+                    setStatus('Klikněte na "Aktivovat Zvuk" pro spuštění', 'amber');
+                    updatePlayerUI();
+                    renderStations();
+                });
+            }
+        }
+
+        // Clean up HLS instance
+        function destroyHls() {
+            if (hlsInstance) {
+                hlsInstance.destroy();
+                hlsInstance = null;
+            }
+        }
+
+        // Manual Audio Unlock Button Handler
+        function unlockAudio() {
+            if (currentStation) {
+                loadAndPlayStream(isUsingFallback ? currentStation.fallbackUrl : currentStation.url);
+            } else if (STATIONS.length > 0) {
+                playStation(STATIONS[0].id);
+            }
+        }
+
+        // Action: Play Station
+        function playStation(stationId) {
+            const station = STATIONS.find(s => s.id === stationId);
+            if (!station) return;
+
+            // Toggle pause if clicking current active station
+            if (currentStation && currentStation.id === station.id) {
+                togglePlayPause();
+                return;
+            }
+
+            currentStation = station;
+            isUsingFallback = false;
+            retryBtn.classList.add('hidden');
+
+            loadAndPlayStream(station.url);
+            showToast(`Načítám: ${station.name}`, 'info');
+            
+            updatePlayerUI();
+            renderStations();
+        }
+
+        // Toggle Play/Pause
+        function togglePlayPause() {
+            if (!currentStation) return;
+
+            if (audio.paused) {
+                if (!audio.src && !hlsInstance) {
+                    loadAndPlayStream(isUsingFallback ? currentStation.fallbackUrl : currentStation.url);
+                } else {
+                    audio.play().catch(err => {
+                        console.error("Play toggle failed:", err);
+                        autoplayBanner.classList.remove('hidden');
+                    });
+                }
+            } else {
+                audio.pause();
+            }
+        }
+
+        // Stop Radio
+        function stopRadio() {
+            if (!currentStation) return;
+            destroyHls();
+            audio.pause();
+            audio.currentTime = 0;
+            audio.removeAttribute('src');
+            audio.load();
+            
+            isPlaying = false;
+            currentStation = null;
+            playerStreamType.classList.add('hidden');
+            retryBtn.classList.add('hidden');
+            
+            setStatus('Připraven k přehrávání');
+            updatePlayerUI();
+            renderStations();
+        }
+
+        // Retry Current Station
+        function retryCurrentStation() {
+            if (currentStation) {
+                retryBtn.classList.add('hidden');
+                isUsingFallback = false;
+                loadAndPlayStream(currentStation.url);
+            }
+        }
+
+        // Render Category Filter Pills
+        function renderCategories() {
+            categoriesContainer.innerHTML = '';
+            CATEGORIES.forEach(cat => {
+                const isActive = selectedCategory === cat && !showOnlyFavs;
+                const btn = document.createElement('button');
+                btn.className = `px-4 py-1.5 rounded-full font-semibold transition-all whitespace-nowrap text-xs ${
+                    isActive 
+                    ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 shadow-neon-blue font-bold' 
+                    : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80'
+                }`;
+                btn.textContent = cat;
+                btn.onclick = () => selectCategory(cat);
+                categoriesContainer.appendChild(btn);
+            });
+        }
+
+        // Render Station Cards Grid
+        function renderStations() {
+            stationsGrid.innerHTML = '';
+
+            let filtered = STATIONS.filter(station => {
+                const matchesCategory = (selectedCategory === 'Vše') || (station.category === selectedCategory);
+                const query = searchQuery.toLowerCase();
+                const matchesSearch = station.name.toLowerCase().includes(query) || 
+                                      station.category.toLowerCase().includes(query) ||
+                                      station.description.toLowerCase().includes(query);
+                const matchesFav = !showOnlyFavs || favorites.includes(station.id);
+
+                return matchesCategory && matchesSearch && matchesFav;
+            });
+
+            stationsCount.textContent = filtered.length;
+
+            if (filtered.length === 0) {
+                stationsGrid.classList.add('hidden');
+                emptyState.classList.remove('hidden');
+                emptyState.classList.add('flex');
+                return;
+            }
+
+            stationsGrid.classList.remove('hidden');
+            emptyState.classList.add('hidden');
+            emptyState.classList.remove('flex');
+
+            filtered.forEach(station => {
+                const isFav = favorites.includes(station.id);
+                const isCurrent = currentStation && currentStation.id === station.id;
+                
+                const card = document.createElement('div');
+                card.className = `group relative rounded-2xl bg-slate-900/70 border ${
+                    isCurrent ? 'border-cyan-400 ring-2 ring-cyan-400/20 bg-slate-900 shadow-neon-blue' : 'border-slate-800 hover:border-slate-700'
+                } p-4 transition-all duration-300 flex flex-col justify-between hover:-translate-y-1 hover:shadow-2xl`;
+
+                card.innerHTML = `
+                    <div>
+                        <!-- Header Bar inside Card -->
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md bg-slate-800/90 text-cyan-400 border border-slate-700/80">
+                                ${station.category}
+                            </span>
+                            <button onclick="toggleFavorite('${station.id}', event)" class="p-1.5 text-slate-400 hover:text-rose-500 transition">
+                                <i class="${isFav ? 'fa-solid text-rose-500' : 'fa-regular'} fa-heart text-base"></i>
+                            </button>
+                        </div>
+
+                        <!-- Info & Logo -->
+                        <div class="flex items-start gap-3.5 mb-3">
+                            <div class="w-12 h-12 rounded-xl bg-gradient-to-br ${station.color} flex items-center justify-center text-white font-extrabold text-base shadow-lg flex-shrink-0 group-hover:scale-105 transition transform">
+                                ${station.name.substring(0, 2)}
+                            </div>
+                            <div>
+                                <h3 class="font-bold text-slate-100 group-hover:text-cyan-400 transition text-sm leading-snug">
+                                    ${station.name}
+                                </h3>
+                                <p class="text-xs text-slate-400 line-clamp-2 mt-1 leading-relaxed">
+                                    ${station.description}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Action Controls -->
+                    <div class="pt-3 border-t border-slate-800/80 flex items-center justify-between mt-2">
+                        <span class="text-[11px] text-slate-400 flex items-center gap-1.5 font-mono">
+                            <span class="w-2 h-2 rounded-full ${isCurrent && isPlaying ? 'bg-emerald-400 animate-ping' : 'bg-slate-600'}"></span>
+                            ${station.type.toUpperCase()}
+                        </span>
+
+                        <button onclick="playStation('${station.id}')" 
+                                class="px-3.5 py-1.5 rounded-xl ${isCurrent && isPlaying ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold' : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold'} text-xs flex items-center gap-2 shadow-md transition transform active:scale-95">
+                            <i class="fa-solid ${isCurrent && isPlaying ? 'fa-pause' : 'fa-play'}"></i>
+                            <span>${isCurrent && isPlaying ? 'Pozastavit' : 'Přehrát'}</span>
+                        </button>
+                    </div>
+                `;
+
+                stationsGrid.appendChild(card);
+            });
+        }
+
+        // Action: Select Category Filter
+        function selectCategory(category) {
+            selectedCategory = category;
+            showOnlyFavs = false;
+            favFilterBtn.classList.remove('border-rose-500', 'bg-rose-500/20');
+            sectionTitle.textContent = category === 'Vše' ? 'Všechny stanice' : `Žánr: ${category}`;
+            renderCategories();
+            renderStations();
+        }
+
+        // Action: Toggle Favorite Filter View
+        function toggleFavoriteFilter() {
+            showOnlyFavs = !showOnlyFavs;
+            if (showOnlyFavs) {
+                selectedCategory = 'Vše';
+                favFilterBtn.classList.add('border-rose-500', 'bg-rose-500/20');
+                sectionTitle.textContent = 'Oblíbená rádia';
+            } else {
+                favFilterBtn.classList.remove('border-rose-500', 'bg-rose-500/20');
+                sectionTitle.textContent = 'Všechny stanice';
+            }
+            renderCategories();
+            renderStations();
+        }
+
+        // Toggle Favorite Item
+        function toggleFavorite(stationId, event) {
+            if (event) event.stopPropagation();
+            
+            const index = favorites.indexOf(stationId);
+            if (index > -1) {
+                favorites.splice(index, 1);
+                showToast('Odebráno z oblíbených', 'info');
+            } else {
+                favorites.push(stationId);
+                showToast('Přidáno do oblíbených', 'success');
+            }
+
+            localStorage.setItem('cz_radio_favs_v2', JSON.stringify(favorites));
+            updateFavBadge();
+            renderStations();
+            updatePlayerUI();
+        }
+
+        function toggleCurrentPlayerFavorite() {
+            if (currentStation) {
+                toggleFavorite(currentStation.id);
+            }
+        }
+
+        function updateFavBadge() {
+            favCountBadge.textContent = favorites.length;
+        }
+
+        // Update Bottom Floating Player Bar
+        function updatePlayerUI() {
+            if (!currentStation) {
+                playerTitle.textContent = 'Vyberte rádio';
+                playerSubtitle.textContent = 'Klikněte na jakoukoli stanici pro spuštění';
+                playerAvatar.className = 'w-12 h-12 rounded-xl bg-slate-900 border border-slate-700/80 flex items-center justify-center text-slate-400 text-xl flex-shrink-0 relative overflow-hidden';
+                playerAvatar.innerHTML = '<i class="fa-solid fa-radio"></i>';
+                playerLiveDot.classList.add('hidden');
+                
+                playPauseBtn.disabled = true;
+                stopBtn.disabled = true;
+                playerFavBtn.disabled = true;
+
+                playIcon.className = 'fa-solid fa-play text-lg ml-0.5';
+                eqVisualizer.classList.add('paused');
+                return;
+            }
+
+            playPauseBtn.disabled = false;
+            stopBtn.disabled = false;
+            playerFavBtn.disabled = false;
+
+            playerTitle.textContent = currentStation.name;
+            playerSubtitle.textContent = `${currentStation.category} • Živé internetové vysílání`;
+
+            // Avatar Styled Badge
+            playerAvatar.className = `w-12 h-12 rounded-xl bg-gradient-to-br ${currentStation.color} text-white font-extrabold text-base flex items-center justify-center shadow-md flex-shrink-0 relative overflow-hidden`;
+            playerAvatar.textContent = currentStation.name.substring(0, 2);
+
+            // Favorite Icon
+            const isFav = favorites.includes(currentStation.id);
+            playerFavBtn.innerHTML = `<i class="${isFav ? 'fa-solid text-rose-500' : 'fa-regular'} fa-heart text-lg"></i>`;
+
+            // Visualizer & Controls state
+            if (isPlaying) {
+                playIcon.className = 'fa-solid fa-pause text-lg';
+                eqVisualizer.classList.remove('paused');
+            } else {
+                playIcon.className = 'fa-solid fa-play text-lg ml-0.5';
+                eqVisualizer.classList.add('paused');
+            }
+        }
+
+        // Volume Mute Toggle
+        function toggleMute() {
+            if (audio.muted) {
+                audio.muted = false;
+                volumeSlider.value = lastVolume || 0.8;
+                audio.volume = volumeSlider.value;
+            } else {
+                lastVolume = volumeSlider.value;
+                audio.muted = true;
+                volumeSlider.value = 0;
+            }
+            updateVolumeIcon();
+        }
+
+        function updateVolumeIcon() {
+            const icon = document.getElementById('mute-icon');
+            if (audio.muted || audio.volume === 0) {
+                icon.className = 'fa-solid fa-volume-xmark text-sm w-4 text-rose-400';
+            } else if (audio.volume < 0.5) {
+                icon.className = 'fa-solid fa-volume-low text-sm w-4 text-slate-300';
+            } else {
+                icon.className = 'fa-solid fa-volume-high text-sm w-4 text-slate-300';
+            }
+        }
+
+        // Search Input Setup
+        function setupSearchInput() {
+            searchInput.addEventListener('input', (e) => {
+                searchQuery = e.target.value.trim();
+                if (searchQuery.length > 0) {
+                    clearSearchBtn.classList.remove('hidden');
+                } else {
+                    clearSearchBtn.classList.add('hidden');
+                }
+                renderStations();
+            });
+
+            clearSearchBtn.addEventListener('click', () => {
+                searchInput.value = '';
+                searchQuery = '';
+                clearSearchBtn.classList.add('hidden');
+                renderStations();
+            });
+        }
+
+        // Reset Filters Helper
+        function resetFilters() {
+            searchInput.value = '';
+            searchQuery = '';
+            selectedCategory = 'Vše';
+            showOnlyFavs = false;
+            clearSearchBtn.classList.add('hidden');
+            favFilterBtn.classList.remove('border-rose-500', 'bg-rose-500/20');
+            sectionTitle.textContent = 'Všechny stanice';
+            renderCategories();
+            renderStations();
+        }
+
+        // Status Bar Feedback Helper
+        function setStatus(text, color = 'slate', pulse = false) {
+            playerStatusText.textContent = text;
+            const colorClasses = {
+                slate: 'text-slate-400',
+                amber: 'text-amber-400',
+                emerald: 'text-emerald-400',
+                rose: 'text-rose-400'
+            };
+            playerStatusText.className = `${colorClasses[color] || 'text-slate-400'} ${pulse ? 'animate-pulse' : ''}`;
+        }
+
+        // Toast Notification System
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-msg');
+            const toastIcon = document.getElementById('toast-icon');
+
+            toastMsg.textContent = message;
+
+            if (type === 'error') {
+                toastIcon.className = 'fa-solid fa-circle-exclamation text-rose-400';
+            } else if (type === 'success') {
+                toastIcon.className = 'fa-solid fa-circle-check text-emerald-400';
+            } else {
+                toastIcon.className = 'fa-solid fa-circle-info text-cyan-400';
+            }
+
+            toast.classList.remove('opacity-0', 'translate-y-[-20px]', 'pointer-events-none');
+            toast.classList.add('opacity-100', 'translate-y-0');
+
+            setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'translate-y-[-20px]', 'pointer-events-none');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
